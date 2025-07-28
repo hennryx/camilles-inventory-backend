@@ -1,4 +1,4 @@
-const ProductBatch = require("../../models/Products/batch");
+const ProductBatch = require("../../models/Products/batchSchema");
 const Transaction = require("../../models/Transaction/TransactionSchema");
 
 exports.getPurchases = async (req, res) => {

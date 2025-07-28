@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const Product = require('../../models/Products/ProductSchema');
-const ProductBatch = require("../../models/Products/batch");
+const ProductBatch = require("../../models/Products/batchSchema");
 const Transaction = require("../../models/Transaction/TransactionSchema");
 const path = require('path');
 const fs = require('fs');
@@ -24,6 +24,7 @@ exports.getProducts = async (req, res) => {
             query.$or = [
                 { productName: { $regex: search, $options: 'i' } },
                 { unit: { $regex: search, $options: 'i' } },
+                { category: { $regex: search, $options: 'i' } }
             ];
         }
 
@@ -125,7 +126,7 @@ exports.getIndividualProduct = async (req, res) => {
     try {
         const id = req.query.id;
 
-        if(!id) {
+        if (!id) {
             res.status(400).json({
                 success: false,
                 message: "Missing Id"
@@ -146,6 +147,7 @@ exports.getIndividualProduct = async (req, res) => {
 
         const totalStock = stockData.length > 0 ? stockData[0].totalStock : 0;
 
+        console.log(stockData)
         const productWithStock = {
             ...product.toObject(),
             inStock: totalStock
@@ -253,7 +255,7 @@ const getTopSellingProductsThisMonth = async () => {
 
     // Get all-time total sales for these products
     const productIds = topProductsThisMonth.map(item => item._id);
-    
+
     const allTimeSales = await Transaction.aggregate([
         {
             $match: {
@@ -331,9 +333,10 @@ const getTopSellingProductsThisMonth = async () => {
     return topProductsWithAllTimeSales;
 };
 
+/* done Working */
 exports.addProduct = async (req, res) => {
     try {
-        const { productName, unit, unitSize, sellingPrice, createdBy, category } = req.body;
+        const { productName, unit, unitSize, sellingPrice, createdBy, category, ...remaining } = req.body;
 
         if (!productName || !unit || !unitSize || !sellingPrice) {
             return res.status(400).json({
@@ -344,12 +347,13 @@ exports.addProduct = async (req, res) => {
 
         const product = await Product.create({
             productName,
-            image: req.file ? req.file.filename : null,
+            image: req.image,
             unit,
             unitSize,
             sellingPrice,
             createdBy,
-            category
+            category,
+            ...remaining
         });
 
         res.status(201).json({
@@ -365,6 +369,7 @@ exports.addProduct = async (req, res) => {
     }
 }
 
+/* done Working */
 exports.updateProduct = async (req, res) => {
     try {
         const { productName, unit, unitSize, sellingPrice, _id, category } = req.body;
@@ -377,15 +382,14 @@ exports.updateProduct = async (req, res) => {
             });
         }
 
-        if (req.file) {
-            if (product.image) {
-                const oldImagePath = path.join(__dirname, '../../assets/products', product.image);
-                if (fs.existsSync(oldImagePath)) {
-                    fs.unlinkSync(oldImagePath);
-                }
+        if (req.file && req.image) {
+            // Delete old image from Cloudinary if it exists
+            if (product.image && product.image.cloudinary_id) {
+                await cloudinary.uploader.destroy(product.image.cloudinary_id);
             }
 
-            product.image = req.file.filename;
+            // Update image with new Cloudinary data
+            product.image = req.image; // From uploadToCloudinary middleware
         }
 
         if (productName) product.productName = productName;
@@ -403,6 +407,13 @@ exports.updateProduct = async (req, res) => {
         });
 
     } catch (error) {
+        if (req.file) {
+            const tempPath = path.join(__dirname, '../../assets/products', req.file.filename);
+            if (fs.existsSync(tempPath)) {
+                fs.unlinkSync(tempPath);
+            }
+        }
+
         res.status(400).json({
             success: false,
             message: error.message

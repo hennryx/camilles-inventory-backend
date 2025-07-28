@@ -23,7 +23,7 @@ const SalesSchema = new mongoose.Schema({
     batchesUsed: [{
         batch: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'InventoryBatch'
+            ref: 'productBatchSchema'
         },
         quantityUsed: {
             type: Number
