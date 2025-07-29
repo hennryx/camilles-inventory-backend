@@ -4,7 +4,9 @@ const ProductBatch = require("../../models/Products/batchSchema");
 const Transaction = require("../../models/Transaction/TransactionSchema");
 const path = require('path');
 const fs = require('fs');
+const { getTopSellingProducts } = require("../../services/transactionService");
 
+/* done Working */
 exports.getProducts = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -20,7 +22,7 @@ exports.getProducts = async (req, res) => {
             query.status = 'active';
         }
 
-        if (search && search.trim().toLowerCase() !== 'all') {
+        if (search && search.toLowerCase() !== 'all') {
             query.$or = [
                 { productName: { $regex: search, $options: 'i' } },
                 { unit: { $regex: search, $options: 'i' } },
@@ -28,7 +30,7 @@ exports.getProducts = async (req, res) => {
             ];
         }
 
-        if (category && category.trim().toLowerCase() !== 'all') {
+        if (category && category.toLowerCase() !== 'all') {
             query.category = { $regex: category, $options: 'i' };
         }
 
@@ -40,68 +42,48 @@ exports.getProducts = async (req, res) => {
             .sort({ createdAt: -1 })
             .lean();
 
-        const stockData = await ProductBatch.aggregate([
-            { $unwind: '$products' },
-            {
-                $group: {
-                    _id: '$products.product',
-                    totalStock: { $sum: '$products.remainingStock' }
-                }
-            }
-        ]);
-
         const soldData = await Transaction.aggregate([
             {
                 $match: {
                     transactionType: 'SALE'
                 }
             },
-            { $unwind: '$products' },
+            { $unwind: '$items' },
             {
                 $group: {
-                    _id: '$products.product',
-                    totalSold: { $sum: '$products.quantity' }
+                    _id: '$items.product',
+                    totalSold: { $sum: '$items.quantity' },
+                    totalRevenue: { $sum: { $multiply: ['$items.quantity', '$items.unitPrice'] } }
                 }
             }
         ]);
 
-        const stockMap = {};
-        stockData.forEach(item => {
-            if (item._id) {
-                stockMap[item._id.toString()] = item.totalStock;
-            }
-        });
-
         const soldMap = {};
         soldData.forEach(item => {
             if (item._id) {
-                soldMap[item._id.toString()] = item.totalSold;
+                soldMap[item._id.toString()] = { totalSold: item.totalSold, totalRevenue: item.totalRevenue };
             }
         });
 
         const productsWithStock = products.map(prod => ({
             ...prod,
-            inStock: stockMap[prod._id.toString()] || 0,
-            totalSold: soldMap[prod._id.toString()] || 0
+            totalSold: soldMap[prod._id.toString()]?.totalSold || 0,
+            totalRevenue: soldMap[prod._id.toString()]?.totalRevenue || 0
         }));
 
-        const activeProducts = productsWithStock.filter(p => p.status === 'active');
+        // Calculate stock metrics
+        const minimumStock = productsWithStock.filter(p => p.totalStock <= 10 && p.totalStock > 0).length;
+        const outStock = productsWithStock.filter(p => p.totalStock === 0).length;
 
-        const minimumStock = activeProducts.filter(p => p.inStock <= 10 && p.inStock !== 0).length;
-        const outStock = activeProducts.filter(p => p.inStock === 0).length;
+        // Get top-selling products
+        const now = new Date();
+        const month = now.getMonth() + 1
+        const year = now.getFullYear()
+        const topProducts = await getTopSellingProducts(month, year, limit);
 
-        const topProducts = await getTopSellingProductsThisMonth();
-
-        const allActiveProducts = await Product.find({ status: 'active' }).lean();
-        const allActiveProductsWithStock = allActiveProducts.map(prod => ({
-            ...prod,
-            inStock: stockMap[prod._id.toString()] || 0,
-            totalSold: soldMap[prod._id.toString()] || 0
-        }));
-
-        /* const productsWithStockOnly = allActiveProductsWithStock.filter(p => p.inStock > 0); */
-
-        const allCategories = ["all", ...new Set(allActiveProductsWithStock.map(product => product.category))];
+        // Get distinct categories
+        const allCategories = await Product.distinct('category', { status: 'active' });
+        allCategories.unshift('all'); // Add 'all' option
 
         res.status(200).json({
             success: true,
@@ -112,7 +94,7 @@ exports.getProducts = async (req, res) => {
             totalPages: Math.ceil(totalItems / limit),
             data: productsWithStock,
             topProducts,
-            allCategories: allCategories
+            allCategories
         });
     } catch (error) {
         res.status(500).json({
@@ -122,6 +104,7 @@ exports.getProducts = async (req, res) => {
     }
 }
 
+/* done Working */
 exports.getIndividualProduct = async (req, res) => {
     try {
         const id = req.query.id;
@@ -134,29 +117,9 @@ exports.getIndividualProduct = async (req, res) => {
         }
 
         const product = await Product.findById(id);
-
-        const stockData = await ProductBatch.aggregate([
-            { $unwind: '$products' },
-            {
-                $group: {
-                    _id: id,
-                    totalStock: { $sum: '$products.remainingStock' }
-                }
-            }
-        ]);
-
-        const totalStock = stockData.length > 0 ? stockData[0].totalStock : 0;
-
-        console.log(stockData)
-        const productWithStock = {
-            ...product.toObject(),
-            inStock: totalStock
-        };
-
-
         res.status(200).json({
             success: true,
-            data: productWithStock,
+            data: product,
             message: "Product fetch Successfully"
         });
     } catch (error) {
@@ -167,55 +130,94 @@ exports.getIndividualProduct = async (req, res) => {
     }
 }
 
+/* done Working */
 exports.getAllProducts = async (req, res) => {
     try {
-        const totalItems = await Product.countDocuments();
+        // Parse query parameters for optional pagination
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.max(1, parseInt(req.query.limit) || 100); // Default high limit for "all"
+        const skip = (page - 1) * limit;
+        const showInactive = req.query.showInactive === 'true';
 
-        const products = await Product.find()
+        // Build query
+        let query = {};
+        if (!showInactive) {
+            query.status = 'active';
+        }
+
+        // Get total items for pagination
+        const totalItems = await Product.countDocuments(query);
+
+        // Fetch products with pagination and sorting
+        const products = await Product.find(query)
+            .skip(skip)
+            .limit(limit)
             .sort({ createdAt: -1 })
             .lean();
 
-        const stockData = await ProductBatch.aggregate([
-            { $unwind: '$products' },
+        // Aggregate sales data for July 2025
+        const soldData = await Transaction.aggregate([
+            {
+                $match: {
+                    transactionType: 'SALE',
+                    transactionDate: {
+                        $gte: new Date('2025-07-01T00:00:00.000Z'),
+                        $lte: new Date('2025-07-31T23:59:59.999Z')
+                    }
+                }
+            },
+            { $unwind: '$items' },
             {
                 $group: {
-                    _id: '$products.product',
-                    totalStock: { $sum: '$products.remainingStock' }
+                    _id: '$items.product',
+                    totalSold: { $sum: '$items.quantity' },
+                    totalRevenue: { $sum: { $multiply: ['$items.quantity', '$items.unitPrice'] } }
                 }
             }
         ]);
 
-        const stockMap = {};
-        stockData.forEach(item => {
+        // Map sales data
+        const soldMap = {};
+        soldData.forEach(item => {
             if (item._id) {
-                stockMap[item._id?.toString()] = item.totalStock;
+                soldMap[item._id.toString()] = { totalSold: item.totalSold, totalRevenue: item.totalRevenue };
             }
         });
 
+        // Map products with stock and sales data
         const productsWithStock = products.map(prod => ({
             ...prod,
-            inStock: stockMap[prod._id.toString()] || 0
+            totalSold: soldMap[prod._id.toString()]?.totalSold || 0,
+            totalRevenue: soldMap[prod._id.toString()]?.totalRevenue || 0
         }));
 
-        const activeProducts = productsWithStock.filter(p => p.status === 'active');
+        // Calculate stock metrics
+        const minimumStock = productsWithStock.filter(p => p.totalStock <= 10 && p.totalStock > 0).length;
+        const outStock = productsWithStock.filter(p => p.totalStock === 0).length;
 
-        const minimumStock = activeProducts.filter(p => p.inStock <= 10 && p.inStock !== 0).length;
-        const outStock = activeProducts.filter(p => p.inStock === 0).length;
-
+        // Get top-selling products
         let topProducts = [];
         try {
-            topProducts = await getTopSellingProductsThisMonth();
+            topProducts = await getTopSellingProducts();
         } catch (error) {
-            console.error('Error getting top products:', error);
+            // Return empty array instead of failing
+            topProducts = [];
         }
+
+        // Get distinct categories
+        const allCategories = await Product.distinct('category', { status: 'active' });
+        allCategories.unshift('all');
 
         res.status(200).json({
             success: true,
             totalItems,
             minimumStock,
             outStock,
+            currentPage: page,
+            totalPages: Math.ceil(totalItems / limit),
             data: productsWithStock,
-            topProducts
+            topProducts,
+            allCategories
         });
     } catch (error) {
         console.error('Error in getAllProducts:', error);
@@ -225,113 +227,6 @@ exports.getAllProducts = async (req, res) => {
         });
     }
 }
-
-const getTopSellingProductsThisMonth = async () => {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-
-    // Get top selling products for this month
-    const topProductsThisMonth = await Transaction.aggregate([
-        {
-            $match: {
-                transactionType: 'SALE',
-                createdAt: {
-                    $gte: startOfMonth,
-                    $lt: endOfMonth
-                }
-            }
-        },
-        { $unwind: '$products' },
-        {
-            $group: {
-                _id: '$products.product',
-                monthlySold: { $sum: '$products.quantity' }
-            }
-        },
-        { $sort: { monthlySold: -1 } },
-        { $limit: 10 }
-    ]);
-
-    // Get all-time total sales for these products
-    const productIds = topProductsThisMonth.map(item => item._id);
-
-    const allTimeSales = await Transaction.aggregate([
-        {
-            $match: {
-                transactionType: 'SALE'
-            }
-        },
-        { $unwind: '$products' },
-        {
-            $match: {
-                'products.product': { $in: productIds }
-            }
-        },
-        {
-            $group: {
-                _id: '$products.product',
-                totalSold: { $sum: '$products.quantity' }
-            }
-        }
-    ]);
-
-    // Create a map for all-time sales lookup
-    const allTimeSalesMap = {};
-    allTimeSales.forEach(item => {
-        if (item._id) {
-            allTimeSalesMap[item._id.toString()] = item.totalSold;
-        }
-    });
-
-    // Combine the data and add product information
-    const topProducts = await Transaction.aggregate([
-        {
-            $match: {
-                transactionType: 'SALE',
-                createdAt: {
-                    $gte: startOfMonth,
-                    $lt: endOfMonth
-                }
-            }
-        },
-        { $unwind: '$products' },
-        {
-            $group: {
-                _id: '$products.product',
-                monthlySold: { $sum: '$products.quantity' }
-            }
-        },
-        { $sort: { monthlySold: -1 } },
-        { $limit: 10 },
-        {
-            $lookup: {
-                from: 'products',
-                localField: '_id',
-                foreignField: '_id',
-                as: 'productInfo'
-            }
-        },
-        { $unwind: '$productInfo' },
-        {
-            $project: {
-                productId: '$_id',
-                name: '$productInfo.productName',
-                monthlySold: 1,
-                image: '$productInfo.image',
-                price: "$productInfo.sellingPrice",
-                status: "$productInfo.status"
-            }
-        }
-    ]);
-
-    const topProductsWithAllTimeSales = topProducts.map(product => ({
-        ...product,
-        totalSold: allTimeSalesMap[product.productId.toString()] || 0
-    }));
-
-    return topProductsWithAllTimeSales;
-};
 
 /* done Working */
 exports.addProduct = async (req, res) => {
@@ -421,6 +316,7 @@ exports.updateProduct = async (req, res) => {
     }
 }
 
+/* done Working */
 exports.deleteProduct = async (req, res) => {
     try {
         const { _id } = req.body;

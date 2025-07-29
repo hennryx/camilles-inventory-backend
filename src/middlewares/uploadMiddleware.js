@@ -10,8 +10,17 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Multer storage (temporary local storage)
-const storage = multer.diskStorage({
+// Common file filter for images
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Not an image! Please upload only images.'), false);
+  }
+};
+
+// Product image storage
+const productStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(__dirname, '../assets/products');
     if (!fs.existsSync(uploadDir)) {
@@ -26,41 +35,54 @@ const storage = multer.diskStorage({
   },
 });
 
-// File filter for images
-const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
-    cb(null, true);
-  } else {
-    cb(new Error('Not an image! Please upload only images.'), false);
-  }
-};
-
-const upload = multer({
-  storage: storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
+// Profile image storage
+const profileStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../assets/profiles');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
   },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, 'profile-' + uniqueSuffix + ext);
+  },
+});
+
+// Multer instances
+const uploadProduct = multer({
+  storage: productStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB for products
   fileFilter: fileFilter,
 });
 
-// Middleware to upload to Cloudinary
+const uploadProfile = multer({
+  storage: profileStorage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB for profiles
+  fileFilter: fileFilter,
+});
+
+// Cloudinary upload middleware
 const uploadToCloudinary = async (req, res, next) => {
   if (!req.file) {
-    // Allow no image upload (optional product image)
-    req.image = null;
+    req.image = null; // Allow no image upload
     return next();
   }
   try {
+    const folder = req.file.path.includes('products') ? 'mern_app/products' : 'mern_app/profiles';
+    const publicIdPrefix = req.file.path.includes('products') ? 'product' : 'profile';
     // Upload to Cloudinary
     const result = await cloudinary.uploader.upload(req.file.path, {
-      folder: 'mern_app/products',
-      public_id: `product-${req.file.filename.split('.')[0]}`,
+      folder: folder,
+      public_id: `${publicIdPrefix}-${req.file.filename.split('.')[0]}`,
     });
 
     // Clean up temporary file
     fs.unlinkSync(req.file.path);
 
-    // Attach image data to request
+    // Attach image data
     req.image = {
       name: req.file.originalname,
       url: result.secure_url,
@@ -75,6 +97,8 @@ const uploadToCloudinary = async (req, res, next) => {
 };
 
 module.exports = {
-  uploadProductImage: upload.single('image'),
-  uploadMiddleware: [upload.single('image'), uploadToCloudinary], // Combine middlewares
+  uploadProductImage: uploadProduct.single('image'),
+  uploadProfileImage: uploadProfile.single('profileImage'),
+  uploadMiddleware: [uploadProduct.single('image'), uploadToCloudinary], // For products
+  uploadProfileMiddleware: [uploadProfile.single('profileImage'), uploadToCloudinary], // For profiles
 };

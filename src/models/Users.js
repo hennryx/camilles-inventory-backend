@@ -41,15 +41,16 @@ const UserSchema = new mongoose.Schema({
         enum: ['ADMIN', 'STAFF', 'CUSTOMER'],
         default: 'STAFF'
     },
-    
+
     profileImage: {
-        type: String,
-        default: null
+        name: String,
+        url: String,
+        cloudinary_id: String,
     },
-    
+
     resetPasswordToken: String,
     resetPasswordExpire: Date,
-    
+
     createdAt: {
         type: Date,
         default: Date.now

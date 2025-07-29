@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router()
 
-const { getAllProducts, getProducts, getIndividualProduct, addProduct, deleteProduct, updateProduct, deductProductStock } = require('../../controllers/products/productsController');
+const { getAllProducts, getProducts, getIndividualProduct, addProduct, deleteProduct, updateProduct } = require('../../controllers/products/productsController');
+const { deductStock } = require('../../controllers/transactions/transactionControllers')
 const { protect } = require('../../middlewares/auth');
 const { uploadMiddleware } = require('../../middlewares/uploadMiddleware');
 
@@ -12,6 +13,6 @@ router.post('/save', protect, uploadMiddleware, addProduct);
 router.put('/update', protect, uploadMiddleware, updateProduct);
 router.delete('/delete', protect, deleteProduct);
 
-router.post('/deduct', protect, deductProductStock)
+router.post('/deduct', protect, deductStock)
 
 module.exports = router;
