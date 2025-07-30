@@ -1,11 +1,14 @@
+const mongoose = require('mongoose');
 const ProductBatch = require("../../models/Products/batchSchema");
+const SupplierSchema = require("../../models/Supplier/SupplierSchema");
 const Transaction = require("../../models/Transaction/TransactionSchema");
+const ProductSchema = require('../../models/Products/ProductSchema');
 
 exports.getPurchases = async (req, res) => {
     try {
         const purchases = await ProductBatch.find()
-        .populate('supplier')
-        .populate('products.product'); 
+            .populate('supplier')
+            .populate('products.product');
 
         res.status(200).json({
             success: true,
@@ -20,54 +23,103 @@ exports.getPurchases = async (req, res) => {
 }
 
 exports.savePurchase = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-        const data = req.body;
+        const { transactionType, items, totalAmount, supplier, purchaseDate, notes, createdBy } = req.body;
 
-        if (!data || Object.keys(data).length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "No purchase data provided."
-            });
+        // Validate required fields
+        if (transactionType !== 'PURCHASE') {
+            throw new Error('Transaction type must be PURCHASE');
+        }
+        if (!items || !Array.isArray(items) || items.length === 0) {
+            throw new Error('Items must be a non-empty array');
+        }
+        if (!totalAmount || totalAmount < 0) {
+            throw new Error('Total amount is required and must be non-negative');
+        }
+        if (!supplier) {
+            throw new Error('Supplier is required for PURCHASE transactions');
+        }
+        if (!createdBy) {
+            throw new Error('CreatedBy is required');
         }
 
-        const { products, supplier, ...rest } = data;
-
-        const updated = products.map((item) => ({
-            product: item.id,
-            remainingStock: item.stock,
-            ...item
-        }));
-
-        const newData = { products: updated, supplier, ...rest };
-        
-        const purchase = await ProductBatch.create(newData);
-
-        if (!purchase) {
-            return res.status(400).json({
-                success: false,
-                message: "Failed to save purchase."
-            });
+        // Validate items structure and product existence
+        for (const item of items) {
+            if (!item.product || !item.quantity || !item.unitPrice) {
+                throw new Error('Each item must have product, quantity, and unitPrice');
+            }
+            if (item.quantity < 1) {
+                throw new Error('Quantity must be at least 1');
+            }
+            if (item.unitPrice < 0) {
+                throw new Error('Unit price must be non-negative');
+            }
+            const product = await ProductSchema.findById(item.product).session(session);
+            if (!product) {
+                throw new Error(`Product ${item.product} not found`);
+            }
         }
 
-        const updatedTransactionPrd = products.map((item) => ({
-            product: item.id,
-            quantity: item.stock,
-        }));
+        // Validate supplier
+        const supplierDoc = await SupplierSchema.findById(supplier).session(session);
+        if (!supplierDoc) {
+            throw new Error('Supplier not found');
+        }
 
-        const transactionData = { products: updatedTransactionPrd, transactionType: "PURCHASE", suppliers: Array.of(supplier) ,...rest, };
-        await Transaction.create(transactionData)
+        // Validate totalAmount
+        const calculatedTotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+        if (calculatedTotal !== totalAmount) {
+            throw new Error('Total amount does not match calculated total');
+        }
+
+        // Create transaction
+        const transaction = new Transaction({
+            transactionType,
+            transactionDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+            items,
+            totalAmount,
+            supplier,
+            notes,
+            createdBy
+        });
+
+        // Create product batches for each item
+        const batches = [];
+        for (const item of items) {
+            const batch = new ProductBatch({
+                product: item.product,
+                stock: item.quantity,
+                remainingStock: item.quantity,
+                purchaseDate: transaction.transactionDate,
+                costPrice: item.unitPrice,
+                batchNumber: `BATCH-${Date.now()}-${item.product.slice(-6)}` // Example batch number
+            });
+            batches.push(batch);
+        }
+
+        // Save transaction and batches within the session
+        await transaction.save({ session });
+        await ProductBatch.insertMany(batches, { session });
+
+        // Commit the transaction
+        await session.commitTransaction();
+
+        // Populate transaction for response
+        await transaction.populate('items.product', 'productName sellingPrice');
+        await transaction.populate('supplier', 'companyName');
 
         res.status(201).json({
             success: true,
-            message: "Purchase saved successfully!",
-            purchase,
+            data: transaction
         });
-
     } catch (error) {
-        res.status(400).json({
-            success: false,
-            message: error.message || "An unexpected error occurred while saving the purchase."
-        })
+        await session.abortTransaction();
+        res.status(400).json({ error: error.message });
+    } finally {
+        session.endSession();
     }
 }
 

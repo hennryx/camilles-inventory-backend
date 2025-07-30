@@ -1,16 +1,58 @@
 const Supplier = require("../../models/Supplier/SupplierSchema");
+const TransactionSchema = require("../../models/Transaction/TransactionSchema");
 
 exports.getAllSuppliers = async (req, res) => {
     try {
-        const supplier = await Supplier.find().populate('products');
+        const page = Number(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 5;
+        const skip = (page - 1) * limit;
+        let search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+        let query = {};
+
+        if (search) {
+            query.$or = [
+                { firstname: { $regex: search, $options: 'i' } },
+                { middlename: { $regex: search, $options: 'i' } },
+                { lastname: { $regex: search, $options: 'i' } },
+                { category: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const suppliers = await Supplier.find(query)
+            .skip(skip)
+            .limit(limit)
+            .sort({ isActive: -1, created: -1 })
+            .lean()
+
+        let totalItems = 0;
+        if (req.query?.search !== "") {
+            totalItems = suppliers.length
+        } else {
+            totalItems = Supplier.countDocuments()
+        }
+
+        const suppliersWithLastOrder = await Promise.all(
+            suppliers.map(async (supplier) => {
+                const lastOrder = await TransactionSchema.findOne({ supplier: supplier._id })
+                    .sort({ createdAt: -1 })
+                    .lean();
+
+                return {
+                    ...supplier,
+                    lastOrder: lastOrder || null
+                };
+            })
+        );
 
         res.status(200).json({
             success: true,
-            count: supplier.length,
-            data: supplier
+            count: totalItems,
+            currentPage: page,
+            totalPages: Math.ceil(totalItems / limit),
+            data: suppliersWithLastOrder
         });
     } catch (error) {
-        res.status(500).json({ 
+        res.status(500).json({
             success: false,
             message: error.message
         });
@@ -48,18 +90,31 @@ exports.deleteSupplier = async (req, res) => {
             })
         }
 
-        const supplier = await Supplier.findByIdAndDelete(_id);
+        const supplier = await Supplier.findById(_id);
 
-        if(!supplier) {
+        if (!supplier) {
             return res.status(400).json({
                 success: false,
-                message: "No user Found"
-            });
+                message: "Supplier Not Found"
+            })
         }
 
+        const updatedSupplier = await Supplier.findByIdAndUpdate(_id,
+            { isActive: !supplier.isActive },
+            { new: true }
+        );
+
+        const data = await Supplier.find()
+            .sort({ isActive: -1, created: -1 })
+            .lean();
+
         res.status(200).json({
-            message: "Supplier deleted successfully",
-            user: supplier,
+            data,
+            count: data.length,
+            currentPage: 1,
+            totalPages: Math.ceil(data.length / 5),
+            message: `Supplier Status changed successfully`,
+            user: updatedSupplier,
             success: true
         });
 
@@ -71,11 +126,11 @@ exports.deleteSupplier = async (req, res) => {
     }
 }
 
-exports.updateSupplier = async(req, res) => {
+exports.updateSupplier = async (req, res) => {
     try {
         const data = req.body;
-        
-        if(!data._id) {
+
+        if (!data._id) {
             return res.status(400).json({
                 success: false,
                 message: "No user Found"
@@ -84,7 +139,7 @@ exports.updateSupplier = async(req, res) => {
 
         const supplier = await Supplier.findByIdAndUpdate(data._id, data, { new: true });
 
-        if(!supplier) {
+        if (!supplier) {
             return res.status(400).json({
                 success: false,
                 message: "No user Found"

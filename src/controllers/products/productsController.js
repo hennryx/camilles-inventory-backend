@@ -34,13 +34,19 @@ exports.getProducts = async (req, res) => {
             query.category = { $regex: category, $options: 'i' };
         }
 
-        const totalItems = await Product.countDocuments(query);
-
+        const allProducts = await Product.find({ status: "active"});
         const products = await Product.find(query)
             .skip(skip)
             .limit(limit)
             .sort({ createdAt: -1 })
             .lean();
+
+        const hasCategory = typeof req.query.category === 'string' && req.query.category.trim() !== "";
+        const hasSearch = typeof req.query.search === 'string' && req.query.search.trim() !== "";
+
+        const totalItems = ((hasCategory || hasSearch) && category !== 'all')
+            ? products.length
+            : await Product.countDocuments();
 
         const soldData = await Transaction.aggregate([
             {
@@ -72,9 +78,9 @@ exports.getProducts = async (req, res) => {
         }));
 
         // Calculate stock metrics
-        const minimumStock = productsWithStock.filter(p => p.totalStock <= 10 && p.totalStock > 0).length;
-        const outStock = productsWithStock.filter(p => p.totalStock === 0).length;
-
+        const minimumStock = allProducts.filter(p => p.totalStock <= 10 && p.totalStock > 0).length;
+        const outStock = allProducts.filter(p => p.totalStock === 0).length;
+        const totalNumberItems = allProducts.length;
         // Get top-selling products
         const now = new Date();
         const month = now.getMonth() + 1
@@ -83,11 +89,11 @@ exports.getProducts = async (req, res) => {
 
         // Get distinct categories
         const allCategories = await Product.distinct('category', { status: 'active' });
-        allCategories.unshift('all'); // Add 'all' option
 
         res.status(200).json({
             success: true,
             totalItems,
+            totalNumberItems,
             minimumStock,
             outStock,
             currentPage: page,
@@ -146,7 +152,7 @@ exports.getAllProducts = async (req, res) => {
         }
 
         // Get total items for pagination
-        const totalItems = await Product.countDocuments(query);
+        const totalItems = await Product.countDocuments();
 
         // Fetch products with pagination and sorting
         const products = await Product.find(query)
@@ -348,152 +354,3 @@ exports.deleteProduct = async (req, res) => {
         });
     }
 }
-
-exports.deductProductStock = async (req, res) => {
-    const { products, quantity, ...data } = req.body;
-
-    if (!Array.isArray(products) || products.length === 0) {
-        return res.status(400).json({ success: false, message: "Invalid products array" });
-    }
-
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-        return res.status(400).json({ success: false, message: "Invalid quantity. Must be a positive number" });
-    }
-
-    try {
-        const deductionDetails = [];
-        const processedProducts = [];
-        let remainingToDeduct = 0;
-        const supplierIds = new Set();
-
-        for (const productId of products) {
-            remainingToDeduct = quantity;
-
-            if (!mongoose.Types.ObjectId.isValid(productId)) {
-                continue;
-            }
-
-            const product = await Product.findById(productId);
-            if (!product || product.status !== 'active') {
-                continue;
-            }
-
-            const batches = await ProductBatch.find({
-                'products.product': productId,
-                'products.remainingStock': { $gt: 0 }
-            }).sort({ 'products.expiryDate': 1 });
-
-            if (batches.length === 0) {
-                console.log(`No available batches found for product ${productId}`);
-                continue;
-            }
-
-            let deductedFromThisProduct = 0;
-
-            for (const batch of batches) {
-                if (remainingToDeduct <= 0) break;
-
-                if (batch.supplier) {
-                    supplierIds.add(batch.supplier.toString());
-                }
-
-                for (let i = 0; i < batch.products.length; i++) {
-                    const item = batch.products[i];
-
-                    if (item.product.toString() === productId && item.remainingStock > 0) {
-                        const deduction = Math.min(item.remainingStock, remainingToDeduct);
-
-                        item.remainingStock -= deduction;
-                        remainingToDeduct -= deduction;
-                        deductedFromThisProduct += deduction;
-
-                        batch.markModified(`products.${i}.remainingStock`);
-
-                        if (deduction > 0) {
-                            deductionDetails.push({
-                                productId,
-                                batchId: batch._id,
-                                expiryDate: item.expiryDate,
-                                deducted: deduction,
-                            });
-                        }
-
-                        if (remainingToDeduct <= 0) break;
-                    }
-                }
-
-                await batch.save();
-
-                if (remainingToDeduct <= 0) break;
-            }
-
-            if (deductedFromThisProduct > 0) {
-                processedProducts.push({
-                    product: productId,
-                    quantity: deductedFromThisProduct,
-                });
-            }
-
-            console.log(`Deducted ${deductedFromThisProduct} units from product ${productId}`);
-        }
-
-        const totalDeducted = quantity - remainingToDeduct;
-
-        if (totalDeducted === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "Unable to deduct stock. No available inventory or products are inactive.",
-                debug: {
-                    requestedProducts: products,
-                    requestedQuantity: quantity
-                }
-            });
-        }
-
-        await Transaction.create({
-            ...data,
-            products: processedProducts,
-            suppliers: Array.from(supplierIds),
-            deductionDetails,
-        });
-
-        const _products = await Product.find({ status: 'active' })
-            .limit(5)
-            .sort({ createdAt: -1 })
-            .lean();
-
-        const stockData = await ProductBatch.aggregate([
-            { $unwind: '$products' },
-            {
-                $group: {
-                    _id: '$products.product',
-                    totalStock: { $sum: '$products.remainingStock' }
-                }
-            }
-        ]);
-
-        const stockMap = {};
-        stockData.forEach(item => {
-            stockMap[item._id.toString()] = item.totalStock;
-        });
-
-        const productsWithStock = _products.map(prod => ({
-            ...prod,
-            inStock: stockMap[prod._id.toString()] || 0
-        }));
-
-        return res.status(200).json({
-            success: true,
-            message: `Successfully deducted ${totalDeducted} unit(s).`,
-            data: productsWithStock
-        });
-
-    } catch (error) {
-        console.error("Stock deduction error:", error);
-        return res.status(500).json({
-            success: false,
-            message: error.message || "An error occurred while processing stock deduction",
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        });
-    }
-};
