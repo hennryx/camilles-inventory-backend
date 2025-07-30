@@ -235,6 +235,25 @@ exports.getAllProducts = async (req, res) => {
 }
 
 /* done Working */
+exports.getCustomProducts = async (req, res) => {
+    try {
+        const products = await Product.find({}, { _id: 1, productName: 1 , unitSize: 1, unit: 1, sellingPrice: 1})
+            .sort({ createdAt: -1 })
+            .lean();
+
+        res.status(200).json({
+            success: true,
+            data: products,
+        });
+    } catch (error) {
+        console.error('Error in getAllProducts:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
+/* done Working */
 exports.addProduct = async (req, res) => {
     try {
         const { productName, unit, unitSize, sellingPrice, createdBy, category, ...remaining } = req.body;
