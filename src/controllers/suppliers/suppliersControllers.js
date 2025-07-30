@@ -14,7 +14,7 @@ exports.getAllSuppliers = async (req, res) => {
                 { firstname: { $regex: search, $options: 'i' } },
                 { middlename: { $regex: search, $options: 'i' } },
                 { lastname: { $regex: search, $options: 'i' } },
-                { category: { $regex: search, $options: 'i' } }
+                { companyName: { $regex: search, $options: 'i' } }
             ];
         }
 
@@ -58,6 +58,27 @@ exports.getAllSuppliers = async (req, res) => {
         });
     }
 }
+
+exports.getAllActiveSuppliers = async (req, res) => {
+    try {
+        
+        const suppliers = await Supplier.find({isActive: true})
+            .sort({ created: -1 })
+            .lean()
+
+        res.status(200).json({
+            success: true,
+            data: suppliers
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
 
 exports.addSupplier = async (req, res) => {
     const body = req.body;
