@@ -1,0 +1,88 @@
+{
+    "addSupplier": {
+        "firstname": "John",
+        "middlename": "A",
+        "lastname": "Doe",
+        "contactNumber": "+12345678901",
+        "companyName": "Doe Supplies Inc.",
+        "companyAddress": {
+            "zipcode": "12345",
+            "street": "123 Main St",
+            "region": "Region I",
+            "province": "Province A",
+            "municipality": "City B",
+            "barangay": "Barangay C"
+        },
+        "isActive": true
+    },
+    "AddProduct": {
+        "productName": "Mineral Water",
+        "unit": "liters",
+        "unitSize": "1L",
+        "containerType": "bottle",
+        "sellingPrice": 1.5,
+        "category": "Beverages",
+        "status": "active",
+        "description": "Pure mineral water in 1L bottles",
+        "brand": "AquaPure",
+        "type": "Drinking Water",
+        "createdBy": "userId"
+    },
+    "PurchaseStock": {
+        "transaction": {
+            "transactionType": "PURCHASE",
+            "transactionDate": "2025-07-29T08:00:00.000Z",
+            "items": [
+                {
+                    "product": "66a7b456789abcdef5678901",
+                    "quantity": 100,
+                    "unitPrice": 1.0
+                }
+            ],
+            "supplier": "66a7b123456789abcdef1234",
+            "totalAmount": 100,
+            "notes": "Purchased 100 1L water bottles",
+            "createdBy": "userId"
+        },
+        "ProductBatch": {
+            "product": "66a7b456789abcdef5678901",
+            "supplier": "66a7b123456789abcdef1234",
+            "stock": 100,
+            "remainingStock": 100,
+            "purchasePrice": 1.0,
+            "expiryDate": "2026-07-29T00:00:00.000Z",
+            "purchaseDate": "2025-07-29T08:00:00.000Z",
+            "createdBy": "userId"
+        }
+    },
+    "Transactions": {
+        "Sale": {
+            "transactionType": "SALE",
+            "transactionDate": "2025-07-29T09:00:00.000Z",
+            "items": [
+                {
+                    "product": "66a7b456789abcdef5678901",
+                    "quantity": 30,
+                    "unitPrice": 1.5
+                }
+            ],
+            "totalAmount": 45,
+            "notes": "Sold 30 bottles via POS",
+            "createdBy": "userId"
+        },
+        "Return": {
+            "transactionType": "RETURN",
+            "transactionDate": "2025-07-29T10:00:00.000Z",
+            "items": [
+                {
+                    "product": "66a7b456789abcdef5678901",
+                    "quantity": 10,
+                    "unitPrice": 1.5
+                }
+            ],
+            "totalAmount": 15,
+            "notes": "Customer returned 10 defective bottles",
+            "createdBy": "userId"
+        }
+    }
+}

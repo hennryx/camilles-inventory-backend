@@ -60,7 +60,21 @@ const ProductSchema = new mongoose.Schema({
     totalStock: {
         type: Number,
         default: 0
-    }
+    },
+    bulkDiscounts: [{
+        minQuantity: {
+            type: Number,
+            min: [1, 'Minimum quantity must be at least 1']
+        },
+        discountType: {
+            type: String,
+            enum: ['percentage', 'fixed'],
+        },
+        discountValue: {
+            type: Number,
+            min: [0, 'Discount value must be positive']
+        }
+    }]
 }, {
     timestamps: true
 });
@@ -90,11 +104,12 @@ ProductSchema.pre('save', async function(next) {
 
 // Update totalStock after batch changes
 ProductSchema.statics.updateTotalStock = async function (productId) {
-    const batches = await mongoose.model('ProductBatch').find({ 'products.product': productId });
-    const totalStock = batches.reduce((sum, batch) => {
+    const batches = await mongoose.model('ProductBatch').find({ 'product': productId });
+    const totalStock = batches.reduce((sum, batch) => sum + batch.remainingStock, 0);
+    /* const totalStock = batches.reduce((sum, batch) => {
         const product = batch.products.find(p => p.product.toString() === productId.toString());
         return sum + (product ? product.remainingStock : 0);
-    }, 0);
+    }, 0); */
     await this.findByIdAndUpdate(productId, { totalStock });
 };
 

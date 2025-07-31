@@ -8,7 +8,7 @@ exports.getPurchases = async (req, res) => {
     try {
         const purchases = await ProductBatch.find()
             .populate('supplier')
-            .populate('products.product');
+            .populate('product');
 
         res.status(200).json({
             success: true,
@@ -57,6 +57,9 @@ exports.savePurchase = async (req, res) => {
             if (item.unitPrice < 0) {
                 throw new Error('Unit price must be non-negative');
             }
+            if (item.expiryDate === "") {
+                throw new Error('expiry date is required');
+            }
             const product = await ProductSchema.findById(item.product).session(session);
             if (!product) {
                 throw new Error(`Product ${item.product} not found`);
@@ -95,7 +98,11 @@ exports.savePurchase = async (req, res) => {
                 remainingStock: item.quantity,
                 purchaseDate: transaction.transactionDate,
                 costPrice: item.unitPrice,
-                batchNumber: `BATCH-${Date.now()}-${item.product.slice(-6)}` // Example batch number
+                batchNumber: `BATCH-${Date.now()}-${item.product.slice(-6)}`,
+                createdBy,
+                purchasePrice: item.unitPrice,
+                supplier,
+                expiryDate: item.expiryDate
             });
             batches.push(batch);
         }

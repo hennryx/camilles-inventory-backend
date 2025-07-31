@@ -101,7 +101,7 @@ const TransactionSchema = new mongoose.Schema({
 });
 
 // Pre-save middleware to generate order number
-TransactionSchema.pre('save', async function (next) {
+TransactionSchema.pre('validate', async function (next) {
     if (this.isNew && !this.orderNumber) {
         try {
             this.orderNumber = await generateOrderNumber(this.transactionDate);
