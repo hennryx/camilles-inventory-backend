@@ -6,11 +6,88 @@ const ProductSchema = require('../../models/Products/ProductSchema');
 
 exports.getPurchases = async (req, res) => {
     try {
-        const purchases = await ProductBatch.find()
-            .populate('supplier')
-            .populate('product');
+        const page = Number(req.query.page) || 1;
+        const limit = Number(req.query.limit) || 5;
+        const skip = (page - 1) * limit;
+        let search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+        const regex = search ? new RegExp(search, 'i') : null;
+
+        let startDate = null
+        let endDate = null
+        let supplierCompanyName = ""
+        let filters = req.query.filters ? JSON.parse(req.query.filters) : null;
+        if (filters) {
+            const { date, supplier } = filters;
+            startDate = date?.start ? new Date(date?.start) : null;
+            endDate = date?.end ? new Date(date?.end) : null;
+            supplierCompanyName = typeof supplier === 'string' ? supplier.trim() : '';
+        }
+        const escapedSupplierCompanyName = supplierCompanyName ? new RegExp(supplierCompanyName, 'i') : null;
+
+        const pipeline = [
+            {
+                $match: {
+                    transactionType: 'PURCHASE',
+                    ...(startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && {
+                        createdAt: {
+                            $gte: startDate,
+                            $lte: endDate
+                        }
+                    })
+                }
+            },
+            {
+                $lookup: {
+                    from: 'suppliers',
+                    localField: 'supplier',
+                    foreignField: '_id',
+                    as: 'supplier'
+                }
+            },
+            { $unwind: { path: '$supplier', preserveNullAndEmptyArrays: true } },
+            {
+                $lookup: {
+                    from: 'products',
+                    localField: 'items.product',
+                    foreignField: '_id',
+                    as: 'products'
+                }
+            },
+            {
+                $match: {
+                    ...(search && {
+                        $or: [
+                            { 'supplier.firstname': regex },
+                            { 'supplier.middlename': regex },
+                            { 'supplier.lastname': regex },
+                            { 'supplier.companyName': regex },
+                            { 'products.productName': regex }
+                        ]
+                    }),
+                    ...(supplierCompanyName && {
+                        $or: [
+                            {'supplier.companyName': escapedSupplierCompanyName}
+                        ]
+                    })
+                }
+            },
+            { $sort: { createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit }
+        ]
+        const purchases = await Transaction.aggregate(pipeline)
+
+        let totalItems = 0;
+        if (search !== "") {
+            totalItems = purchases.length
+        } else {
+            totalItems = await Transaction.countDocuments({ transactionType: "PURCHASE" })
+        }
 
         res.status(200).json({
+            count: totalItems,
+            currentPage: page,
+            totalPages: Math.ceil(totalItems / limit),
             success: true,
             data: purchases,
         });

@@ -28,12 +28,12 @@ exports.getAllSuppliers = async (req, res) => {
         if (req.query?.search !== "") {
             totalItems = suppliers.length
         } else {
-            totalItems = Supplier.countDocuments()
+            totalItems = await Supplier.countDocuments()
         }
 
         const suppliersWithLastOrder = await Promise.all(
             suppliers.map(async (supplier) => {
-                const lastOrder = await TransactionSchema.findOne({ supplier: supplier._id })
+                const lastOrder = await TransactionSchema.findOne({ supplier: supplier._id }, { transactionDate: 1 })
                     .sort({ createdAt: -1 })
                     .lean();
 
