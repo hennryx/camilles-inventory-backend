@@ -281,7 +281,7 @@ exports.updatePurchase = async (req, res) => {
     session.startTransaction();
 
     try {
-        const { _id, items, totalAmount, supplier, purchaseDate, notes, updatedBy } = req.body;
+        const { _id, items, totalAmount, supplier, notes, updatedBy } = req.body;
 
         // Validate required fields
         if (!_id) {
@@ -354,7 +354,7 @@ exports.updatePurchase = async (req, res) => {
                 product: item.product,
                 stock: item.quantity,
                 remainingStock: item.quantity,
-                purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+                purchaseDate: transaction.purchaseDate,
                 costPrice: item.unitPrice,
                 batchNumber: `BATCH-${Date.now()}-${item.product.slice(-6)}`,
                 createdBy: updatedBy,
