@@ -1,11 +1,12 @@
 const Transaction = require('../../models/Transaction/TransactionSchema')
+const ProductBatchSchema = require('../../models/Products/batchSchema')
 
 exports.getTransactions = async (req, res) => {
     try {
         const { startOfDay, endOfDay, type } = req.query
         let query = {}
 
-        if(startOfDay && endOfDay) {
+        if (startOfDay && endOfDay) {
             query = {
                 createdAt: {
                     $gte: startOfDay,
@@ -19,7 +20,7 @@ exports.getTransactions = async (req, res) => {
         }
 
         const transactions = await Transaction.find(query).populate('products.product').populate('suppliers').populate('createdBy');
-        
+
         res.status(200).json({
             success: true,
             count: transactions.length,
@@ -69,6 +70,7 @@ exports.deductStock = async (req, res) => {
             return res.status(400).json({ error: 'Total amount does not match calculated total' });
         }
 
+        await ProductBatchSchema.checkExpiredBatches();
         // Create transaction
         const transaction = await Transaction.create({
             transactionType,
@@ -80,11 +82,98 @@ exports.deductStock = async (req, res) => {
         });
 
         // Populate product details for response
-        await transaction.populate('items.product', 'productName sellingPrice');
+        await transaction.populate([
+            { path: 'items.product', select: 'productName sellingPrice' },
+            { path: 'batchesUsed.batch', select: 'batchNumber expiryDate' }
+        ]);
+
+        const notifications = await mongoose.model('Notification').find({
+            recipients: createdBy,
+            isRead: false
+        }).populate('relatedEntity', 'batchNumber productName');
 
         res.status(201).json({
             success: true,
-            data: transaction
+            data: transaction,
+            notifications: notifications.length > 0 ? notifications : undefined
+        });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+
+/* will be used later to get and add notifications */
+// Endpoint to get all notifications for a user
+
+// Endpoint to get all notifications for a user
+exports.getNotifications = async (req, res) => {
+    try {
+        const userId = req.body.userId || req.user._id; // Use req.user._id if using auth middleware
+        if (!userId) {
+            return res.status(400).json({ error: 'User ID is required' });
+        }
+
+        const notifications = await mongoose.model('Notification').find({
+            recipients: userId
+        })
+            .populate('relatedEntity', 'batchNumber productName orderNumber')
+            .sort({ createdAt: -1 });
+
+        res.status(200).json({
+            success: true,
+            data: notifications
+        });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+// Endpoint to mark a notification as read
+exports.markNotificationAsRead = async (req, res) => {
+    try {
+        const { notificationId, userId } = req.body;
+
+        if (!notificationId || !userId) {
+            return res.status(400).json({ error: 'Notification ID and User ID are required' });
+        }
+
+        const notification = await mongoose.model('Notification').findById(notificationId);
+        if (!notification) {
+            return res.status(404).json({ error: 'Notification not found' });
+        }
+
+        if (!notification.recipients.includes(userId)) {
+            return res.status(403).json({ error: 'User not authorized to mark this notification as read' });
+        }
+
+        if (!notification.readBy.some(read => read.user.toString() === userId.toString())) {
+            notification.readBy.push({ user: userId });
+        }
+
+        if (notification.recipients.every(recipient => 
+            notification.readBy.some(read => read.user.toString() === recipient.toString()))) {
+            notification.isRead = true;
+        }
+
+        await notification.save();
+
+        res.status(200).json({
+            success: true,
+            data: notification
+        });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+};
+
+// Endpoint to get expired batches
+exports.getExpiredBatches = async (req, res) => {
+    try {
+        const notifications = await mongoose.model('ProductBatch').checkExpiredBatches();
+        res.status(200).json({
+            success: true,
+            data: notifications
         });
     } catch (error) {
         res.status(400).json({ error: error.message });

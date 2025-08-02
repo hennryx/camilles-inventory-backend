@@ -59,7 +59,8 @@ const ProductSchema = new mongoose.Schema({
     },
     totalStock: {
         type: Number,
-        default: 0
+        default: 0,
+        min: [0, 'Out of stock'],
     },
     bulkDiscounts: [{
         minQuantity: {
@@ -79,38 +80,56 @@ const ProductSchema = new mongoose.Schema({
     timestamps: true
 });
 
-ProductSchema.pre('save', async function(next) {
-    try {
-        if (!this.qrCode || this.isNew) {
-            const productId = this._id.toString();
-            this.qrCodeData = productId;
-            const qrCodeDataURL = await QRCode.toDataURL(productId, {
-                errorCorrectionLevel: 'L',
-                type: 'image/png',
-                width: 200,
-                margin: 2,
-                color: {
-                    dark: '#000000',
-                    light: '#FFFFFF'
-                }
+// Notify admins when a staff creates a new product
+ProductSchema.post('save', async function() {
+    if (this.isNew) {
+        const user = await mongoose.model('User').findById(this.createdBy);
+        if (user && user.role === 'staff') {
+            const admins = await mongoose.model('User').find({ role: 'admin' });
+            await mongoose.model('Notification').create({
+                message: `Staff ${user.username} created a new product: ${this.productName}`,
+                type: 'SYSTEM',
+                relatedEntity: this._id,
+                entityType: 'Product',
+                recipients: admins.map(admin => admin._id),
+                createdBy: this.createdBy
             });
-            this.qrCode = qrCodeDataURL;
         }
-        next();
-    } catch (error) {
-        next(error);
     }
 });
 
-// Update totalStock after batch changes
+// Update totalStock after batch changes and check for low/out of stock
 ProductSchema.statics.updateTotalStock = async function (productId) {
-    const batches = await mongoose.model('ProductBatch').find({ 'product': productId });
+    const batches = await mongoose.model('ProductBatch').find({ product: productId });
     const totalStock = batches.reduce((sum, batch) => sum + batch.remainingStock, 0);
-    /* const totalStock = batches.reduce((sum, batch) => {
-        const product = batch.products.find(p => p.product.toString() === productId.toString());
-        return sum + (product ? product.remainingStock : 0);
-    }, 0); */
-    await this.findByIdAndUpdate(productId, { totalStock });
-};
+    const product = await this.findById(productId);
+    
+    if (product) {
+        // Check previous stock to avoid duplicate notifications
+        const previousStock = product.totalStock;
+        product.totalStock = totalStock;
+        await product.save({ validateBeforeSave: false }); // Avoid recursive save
 
+        // Notify if stock is low (≤10) or out (0)
+        if (totalStock <= 10 && totalStock > 0 && previousStock > 10) {
+            const usersToNotify = await mongoose.model('User').find({ role: { $in: ['admin', 'staff'] } });
+            await mongoose.model('Notification').create({
+                message: `Product ${product.productName} has low stock: ${totalStock} units remaining`,
+                type: 'LOW_STOCK',
+                relatedEntity: productId,
+                entityType: 'Product',
+                recipients: usersToNotify.map(user => user._id)
+            });
+        } else if (totalStock === 0 && previousStock > 0) {
+            const usersToNotify = await mongoose.model('User').find({ role: { $in: ['admin', 'staff'] } });
+            await mongoose.model('Notification').create({
+                message: `Product ${product.productName} is out of stock`,
+                type: 'LOW_STOCK',
+                relatedEntity: productId,
+                entityType: 'Product',
+                recipients: usersToNotify.map(user => user._id)
+            });
+        }
+    }
+};
 module.exports = mongoose.model('Product', ProductSchema);
