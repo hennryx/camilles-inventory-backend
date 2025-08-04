@@ -76,28 +76,21 @@ const VoucherSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Ensure validUntil is after validFrom
 VoucherSchema.pre('save', function(next) {
     if (this.validUntil <= this.validFrom) {
         return next(new Error('Valid until date must be after valid from date'));
     }
-    next();
-});
 
-// Update status to expired if validity period has ended
-VoucherSchema.pre('save', function(next) {
     if (this.validUntil < new Date()) {
         this.status = 'expired';
     }
-    next();
-});
 
-// Generate unique voucher code if not provided
-VoucherSchema.pre('save', async function(next) {
     if (this.isNew && !this.code) {
         this.code = `VCHR-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
     }
+    
     next();
 });
+
 
 module.exports = mongoose.model('Voucher', VoucherSchema);

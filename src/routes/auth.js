@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect, authorize } = require('../middlewares/auth');
 const { login, register, logout, provideToken } = require('../controllers/authControllers');
-const { getAllUsers } = require('../controllers/users/usersController');
+const { getAllStaff } = require('../controllers/users/usersController');
 const { forgotPassword, resetPassword } = require('../controllers/auth/passwordResetController');
 
 router.post('/login', login);
@@ -13,6 +13,6 @@ router.get('/validateToken', protect, provideToken)
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password/:token', resetPassword);
 
-router.get('/users', protect, authorize('admin'), getAllUsers);
+router.get('/users', protect, authorize('admin'), getAllStaff);
 
 module.exports = router;

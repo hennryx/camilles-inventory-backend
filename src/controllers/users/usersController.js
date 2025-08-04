@@ -3,14 +3,37 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
 
-exports.getAllUsers = async (req, res) => {
+exports.getAllStaff = async (req, res) => {
     try {
-        const users = await Users.find({ role: { $ne: 'ADMIN' } });
+        const search = req.query?.search ? req.query?.search?.trim() : "";
+        const page = Number(req.query.page) || 1;
+        const limit = Number(req.query.limit) || 5;
+        const skip = (page - 1) * limit;
+
+        let query = { role: 'STAFF' }
+
+        if (search !== "") {
+            query.$or = [
+                { firstname: { $regex: search, $options: 'i' } },
+                { middlename: { $regex: search, $options: 'i' } },
+                { lastname: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } },
+            ]
+        }
+
+        const users = await Users.find(query)
+            .skip(skip)
+            .limit(limit)
+            .sort({ createdAt: -1 })
+            .lean();
 
         res.status(200).json({
-            success: true,
-            count: users.length,
-            data: users
+            success: true,  
+            count: users.length,    
+            data: users,
+            currentPage: page,
+            totalPages: Math.ceil(users.length / limit),
+            totalUsers: users.length
         });
     } catch (err) {
         res.status(500).json({
