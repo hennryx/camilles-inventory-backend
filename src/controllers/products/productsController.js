@@ -292,7 +292,7 @@ exports.addProduct = async (req, res) => {
 /* done Working */
 exports.updateProduct = async (req, res) => {
     try {
-        const { productName, unit, unitSize, sellingPrice, _id, category } = req.body;
+        const { productName, unit, unitSize, sellingPrice, _id, category, containerType, description, brand } = req.body;
 
         const product = await Product.findById(_id);
         if (!product) {
@@ -308,8 +308,7 @@ exports.updateProduct = async (req, res) => {
                 await cloudinary.uploader.destroy(product.image.cloudinary_id);
             }
 
-            // Update image with new Cloudinary data
-            product.image = req.image; // From uploadToCloudinary middleware
+            product.image = req.image;
         }
 
         if (productName) product.productName = productName;
@@ -317,6 +316,9 @@ exports.updateProduct = async (req, res) => {
         if (unitSize) product.unitSize = unitSize;
         if (sellingPrice) product.sellingPrice = sellingPrice;
         if (category) product.category = category;
+        if (containerType) product.containerType = containerType;
+        if (description) product.description = description;
+        if (brand) product.brand = brand;
 
         await product.save();
 
