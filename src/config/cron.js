@@ -5,26 +5,41 @@ const Product = require('../models/Products/ProductSchema');
 const Notification = require('../models/Notification/NotificationSchema');
 require('dotenv').config();
 
-const checkStockAndExpiries = async () => {
+const checkStocks = async () => {
     try {
-        await ProductBatch.checkExpiredBatches();
-
         const products = await Product.find({ status: 'active' });
         for (const product of products) {
             await Product.updateTotalStock(product._id);
         }
-        console.log('Stock and expiry check completed');
-        return { success: true, message: 'Stock and expiry check completed' };
+        console.log('Stock check completed');
+        return { success: true, message: 'Stock check completed' };
     } catch (error) {
         console.error('Error in cron job:', error.message);
         return { success: false, error: error.message };
     }
 };
 
+const checkExpires = async () => {
+    try {
+        await ProductBatch.checkExpiredBatches();
+        console.log('Expired products check completed');
+        return { success: true, message: 'expiry check completed' };
+    } catch (error) {
+        console.error('Error in cron job:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+
+// CronJob: run every day at midnight
+const dailyMidnightJob = new CronJob('0 0 * * *', async () => {
+    console.log('Running the midnight expiry check...');
+    await checkExpires();
+}, null, false)
+
 // CronJob: run every hour at minute 0
 const hourlyJob = new CronJob('0 * * * *', async () => {
     console.log('Running hourly stock and expiry check...');
-    await checkStockAndExpiries();
+    await checkStocks();
 }, null, false); // false means don't start immediately
 
 // CronJob: run every day at midnight
@@ -39,7 +54,7 @@ const cleanupJob = new CronJob('0 0 * * *', async () => {
     }
 }, null, false);
 
-// CronJob: health check every 14 minutes
+// CronJob: health check every 14 minutes to keep the server alive we need to check it every 14 minutes
 const performHealthCheck = async () => {
     https
         .get(process.env.API_URL_HEALTH, (res) => {
@@ -56,6 +71,7 @@ const healthCheckJob = new CronJob('*/14 * * * *', async () => {
 // Start all cron jobs
 const startCronJobs = () => {
     hourlyJob.start();
+    dailyMidnightJob.start();
     cleanupJob.start();
     if (process.env.NODE_ENV === 'production') {
         console.log('Health check started');
@@ -67,6 +83,7 @@ const startCronJobs = () => {
 // Stop all cron jobs
 const stopCronJobs = () => {
     hourlyJob.stop();
+    dailyMidnightJob.stop();
     cleanupJob.stop();
     healthCheckJob.stop();
     console.log('Cron jobs stopped');
@@ -74,13 +91,12 @@ const stopCronJobs = () => {
 
 // Expose manual triggers
 const triggerStockAndExpiryCheck = async () => {
-    return await checkStockAndExpiries();
+    return await checkStocks();
 };
 
 module.exports = {
-    checkStockAndExpiries,
+    checkStocks,
     startCronJobs,
     stopCronJobs,
     triggerStockAndExpiryCheck,
-    performHealthCheck
 };

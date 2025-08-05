@@ -3,11 +3,11 @@ require('dotenv').config();
 const path = require('path')
 const app = express();
 const routes = require('./routes');
-const { startCronJobs } = require("./config/cron")
+const { startCronJobs, stopCronJobs } = require("./config/cron")
 const cors = require('cors');
 const cookieParser = require('cookie-parser')
 
-const connectDB = require('./config/db')
+const { connectDB, mongoose } = require('./config/db')
 connectDB()
     .then(() => {
 
@@ -42,7 +42,7 @@ connectDB()
         app.get("/api/health", (req, res) => {
             res.status(200).json({ success: true });
         });
-        
+
         app.use('/', routes);
 
         const port = process.env.PORT || 5000;
@@ -53,3 +53,20 @@ connectDB()
     }).catch((err) => {
         console.log(err);
     });
+
+const gracefulShutdown = async () => {
+    console.log('🛑 Server shutting down...');
+
+    // Stop scheduled tasks
+    stopCronJobs();
+
+    await mongoose.connection.close();
+    console.log('✅ MongoDB connection closed');
+
+    // Exit the process
+    process.exit();
+}
+
+/* when server shuts down or restarts to prevent multiple instances or lingering timers from running */
+process.on('SIGINT', gracefulShutdown);// local dev: Ctrl+C
+process.on('SIGTERM', gracefulShutdown);  // Render platform

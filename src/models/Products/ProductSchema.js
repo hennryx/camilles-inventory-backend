@@ -61,21 +61,7 @@ const ProductSchema = new mongoose.Schema({
         type: Number,
         default: 0,
         min: [0, 'Out of stock'],
-    },
-    bulkDiscounts: [{
-        minQuantity: {
-            type: Number,
-            min: [1, 'Minimum quantity must be at least 1']
-        },
-        discountType: {
-            type: String,
-            enum: ['percentage', 'fixed'],
-        },
-        discountValue: {
-            type: Number,
-            min: [0, 'Discount value must be positive']
-        }
-    }]
+    }
 }, {
     timestamps: true
 });

@@ -10,6 +10,10 @@ const VoucherSchema = new mongoose.Schema({
         minlength: [4, 'Voucher code must be at least 4 characters'],
         maxlength: [20, 'Voucher code cannot exceed 20 characters']
     },
+    discountName: {
+        type: String,
+        required: [true, 'Discount name is required']
+    },
     discountType: {
         type: String,
         enum: ['percentage', 'fixed'],
