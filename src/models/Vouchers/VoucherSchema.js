@@ -8,31 +8,37 @@ const VoucherSchema = new mongoose.Schema({
         trim: true,
         uppercase: true,
         minlength: [4, 'Voucher code must be at least 4 characters'],
-        maxlength: [20, 'Voucher code cannot exceed 20 characters']
+        maxlength: [20, 'Voucher code cannot exceed 20 characters'],
+        default: function () {
+            if (this.isNew) {
+                return `VCHR-SAVE${this.voucherValue}`;
+            }
+            return undefined; // For updates, don't overwrite existing code
+        }
     },
-    discountName: {
+    voucherName: {
         type: String,
-        required: [true, 'Discount name is required']
+        required: [true, 'Voucher name is required']
     },
-    discountType: {
+    voucherType: {
         type: String,
-        enum: ['percentage', 'fixed'],
-        required: [true, 'Discount type is required']
+        enum: ['percentage', 'fixed', 'bulk'],
+        required: [true, 'Voucher type is required']
     },
-    discountValue: {
+    voucherValue: {
         type: Number,
-        required: [true, 'Discount value is required'],
-        min: [0, 'Discount value must be positive']
+        required: [true, 'Voucher value is required'],
+        min: [0, 'Voucher value must be positive']
     },
     minPurchase: {
         type: Number,
         default: 0,
         min: [0, 'Minimum purchase amount must be positive']
     },
-    maxDiscount: {
+    maxvoucher: {
         type: Number,
         default: null,
-        min: [0, 'Maximum discount amount must be positive']
+        min: [0, 'Maximum voucher amount must be positive']
     },
     applicableTo: {
         type: String,
@@ -42,11 +48,11 @@ const VoucherSchema = new mongoose.Schema({
     applicableIds: [{
         type: mongoose.Schema.ObjectId,
         ref: 'Product',
-        required: function() { return this.applicableTo === 'product'; }
+        required: function () { return this.applicableTo === 'product'; }
     }],
     applicableCategories: [{
         type: String,
-        required: function() { return this.applicableTo === 'category'; }
+        required: function () { return this.applicableTo === 'category'; }
     }],
     validFrom: {
         type: Date,
@@ -80,7 +86,7 @@ const VoucherSchema = new mongoose.Schema({
     timestamps: true
 });
 
-VoucherSchema.pre('save', function(next) {
+VoucherSchema.pre('save', function (next) {
     if (this.validUntil <= this.validFrom) {
         return next(new Error('Valid until date must be after valid from date'));
     }
@@ -88,13 +94,7 @@ VoucherSchema.pre('save', function(next) {
     if (this.validUntil < new Date()) {
         this.status = 'expired';
     }
-
-    if (this.isNew && !this.code) {
-        this.code = `VCHR-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-    }
-    
     next();
 });
-
 
 module.exports = mongoose.model('Voucher', VoucherSchema);

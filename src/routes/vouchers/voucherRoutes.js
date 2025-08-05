@@ -1,9 +1,11 @@
 const express = require('express');
 const { protect } = require('../../middlewares/auth');
-const { getVouchers, createVoucher } = require('../../controllers/vouchers/vouchersController');
+const { getVouchers, createVoucher, updateVouchers, deleteVouchers } = require('../../controllers/vouchers/vouchersController');
 const router = express.Router()
 
-router.get('/get', protect, getVouchers)
-router.get('/save', protect, createVoucher)
+router.get('/getAll', protect, getVouchers)
+router.post('/save', protect, createVoucher)
+router.put('/update', protect, updateVouchers)
+router.delete('/delete', protect, deleteVouchers)
 
 module.exports = router;

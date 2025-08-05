@@ -4,17 +4,21 @@ exports.createVoucher = async (req, res) => {
     try {
         const data = req.body;
 
-        await VoucherSchema.create(data)
+        await VoucherSchema.create(data);
+        const allData = await VoucherSchema.find();
+
         res.status(200).json({
-            data,
+            data: allData,
             success: true,
+            message: "Successfully added Voucher"
         });
 
     } catch (error) {
+        console.error(error.message)
         res.status(500).json({
             success: false,
-            message: err.message
-        });
+            message: "Something went wrong"
+        })
     }
 }
 
@@ -28,7 +32,7 @@ exports.getVouchers = async (req, res) => {
         let query = {}
         if(search !== "") {
             query.$or = [
-                { discountName: { $regex: search, $options: 'i' } }
+                { voucherName: { $regex: search, $options: 'i' } }
             ]
         }
         
@@ -42,20 +46,22 @@ exports.getVouchers = async (req, res) => {
             data,
             count: data.length,    
             currentPage: page,
-            toalPages: Math.ceil(data.length / limit),
+            totalPages: Math.ceil(data.length / limit),
             success: true
         })
     } catch (error) {
+        console.error(error.message)
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Something went wrong"
         })
     }
 }
 
 exports.updateVouchers = async (req, res) => {
     try {
-        const data = req.body;
+        const { data, page = 1, limit = 5 } = req.body;
+        
         if(!data._id) {
             res.status(200).json({
                 success: false,
@@ -64,40 +70,66 @@ exports.updateVouchers = async (req, res) => {
         }
         const updatedVoucher = await VoucherSchema.findByIdAndUpdate(data._id, data, {new: true})
 
+        if (!updatedVoucher) {
+            return res.status(404).json({
+                success: false,
+                message: "Voucher not found"
+            });
+        }
+
+        const dataCount = await VoucherSchema.countDocuments();
+
         res.status(200).json({
+            success: true,
             data: updatedVoucher,
-            success: true
+            count: dataCount.length,
+            currentPage: page,
+            totalPages: Math.ceil(dataCount.length / limit),
+            message: "Successfully Updated voucher"
         })  
+
     } catch (error) {
+        console.error(error.message)
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Something went wrong"
         })
     }
 }
 
 exports.deleteVouchers = async (req, res) => {
     try {
-        const { _id } = req.body;
+        const { _id, page = 1, limit = 5 } = req.body;
         if(!_id) {
             res.status(200).json({
                 success: false,
                 message: "Missing id"
             })
         }
-        
-        await VoucherSchema.findByIdAndDelete(_id)
+        const deletedData = await VoucherSchema.findByIdAndDelete(_id);
 
-        const data = await VoucherSchema.find();
+        if (!deletedData) {
+            return res.status(404).json({
+                success: false,
+                message: "Voucher not found"
+            });
+        }
+
+        const dataCount = await VoucherSchema.countDocuments()
 
         res.status(200).json({
-            data,
-            success: true
+            success: true,
+            data: deletedData,
+            count: dataCount.length,
+            currentPage: page,
+            totalPages: Math.ceil(dataCount.length / limit),
+            message: "Successfully Deleted voucher"
         })
     } catch (error) {
+        console.error(error.message)
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Something went wrong"
         })
     }
 }
