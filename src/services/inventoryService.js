@@ -1,7 +1,7 @@
-const Purchase = require('../models/Purchase');
+/* const Purchase = require('../models/Purchase');
 const Product = require('../models/Product');
-const mongoose = require('mongoose');
- 
+const mongoose = require('mongoose'); 
+
 exports.processPurchase = async (purchaseId) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -170,4 +170,16 @@ exports.getProductsNearingExpiry = async (daysThreshold = 30) => {
     }
     
     return productsWithExpiringBatches;
-};
+}; */
+
+exports.getStocksInfo = async (allProducts) => {
+    const minimumStock = allProducts.filter(p => p.totalStock <= 10 && p.totalStock > 0).length;
+    const outStock = allProducts.filter(p => p.totalStock === 0).length;
+    const totalNumberItems = allProducts.length;
+
+    return {
+        minimumStock,
+        outStock,
+        totalNumberItems
+    }
+}

@@ -1,10 +1,9 @@
-const mongoose = require("mongoose");
 const Product = require('../../models/Products/ProductSchema');
-const ProductBatch = require("../../models/Products/batchSchema");
 const Transaction = require("../../models/Transaction/TransactionSchema");
 const path = require('path');
 const fs = require('fs');
 const { getTopSellingProducts } = require("../../services/transactionService");
+const { getStocksInfo } = require('../../services/inventoryService');
 
 /* done Working */
 exports.getProducts = async (req, res) => {
@@ -78,9 +77,8 @@ exports.getProducts = async (req, res) => {
         }));
 
         // Calculate stock metrics
-        const minimumStock = allProducts.filter(p => p.totalStock <= 10 && p.totalStock > 0).length;
-        const outStock = allProducts.filter(p => p.totalStock === 0).length;
-        const totalNumberItems = allProducts.length;
+        const {minimumStock, outStock, totalNumberItems} = await getStocksInfo(allProducts);
+
         // Get top-selling products
         const now = new Date();
         const month = now.getMonth() + 1
@@ -292,7 +290,7 @@ exports.addProduct = async (req, res) => {
 /* done Working */
 exports.updateProduct = async (req, res) => {
     try {
-        const { productName, unit, unitSize, sellingPrice, _id, category, containerType, description, brand } = req.body;
+        const { productName, unit, unitSize, sellingPrice, _id, category, containerType, description, brand, page = 1, limit = 5 } = req.body;
 
         const product = await Product.findById(_id);
         if (!product) {
@@ -322,10 +320,18 @@ exports.updateProduct = async (req, res) => {
 
         await product.save();
 
+        const allData = await Product.find({ status: 'active'});
+        const { minimumStock, outStock, totalNumberItems } = await getStocksInfo(allData)
         res.status(200).json({
             success: true,
+            data: product,
+            count: allData.length,
+            totalNumberItems,
+            minimumStock,
+            outStock,
+            currentPage: Number(page),
+            totalPages: Math.ceil(allData.length / limit),
             message: "Product updated successfully!",
-            product
         });
 
     } catch (error) {
@@ -336,9 +342,10 @@ exports.updateProduct = async (req, res) => {
             }
         }
 
+        console.error(error.message)
         res.status(400).json({
             success: false,
-            message: error.message
+            message: "Something went wrong"
         });
     }
 }
@@ -346,7 +353,7 @@ exports.updateProduct = async (req, res) => {
 /* done Working */
 exports.deleteProduct = async (req, res) => {
     try {
-        const { _id } = req.body;
+        const { _id, page=1, limit=5 } = req.body;
 
         const product = await Product.findById(_id);
 
@@ -357,15 +364,24 @@ exports.deleteProduct = async (req, res) => {
             });
         }
 
-        const updatedProduct = await Product.findByIdAndUpdate(
+        await Product.findByIdAndUpdate(
             _id,
             { status: 'inactive' },
             { new: true }
         );
 
+        const allData = await Product.find({ status: 'active'});
+        const { minimumStock, outStock, totalNumberItems } = await getStocksInfo(allData)
+
         res.status(200).json({
-            product: updatedProduct,
+            product: allData,
             success: true,
+            count: allData.length,
+            totalNumberItems,
+            minimumStock,
+            outStock,
+            currentPage: Number(page),
+            totalPages: Math.ceil(allData.length / limit),
             message: "Product marked as inactive successfully!"
         });
     } catch (error) {

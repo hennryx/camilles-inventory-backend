@@ -1,5 +1,6 @@
 const Transaction = require('../../models/Transaction/TransactionSchema')
 const ProductBatchSchema = require('../../models/Products/batchSchema')
+const { getStocksInfo } = require('../../services/inventoryService')
 
 exports.getTransactions = async (req, res) => {
     try {
@@ -36,7 +37,7 @@ exports.getTransactions = async (req, res) => {
 
 exports.deductStock = async (req, res) => {
     try {
-        const { transactionType, items, totalAmount, notes, createdBy } = req.body;
+        const { transactionType, items, totalAmount, notes, createdBy, page=1, limit=5 } = req.body;
 
         // Validate required fields
         if (!transactionType || !items || !totalAmount || !createdBy) {
@@ -87,6 +88,11 @@ exports.deductStock = async (req, res) => {
             { path: 'batchesUsed.batch', select: 'batchNumber expiryDate' }
         ]);
 
+        const productIds = items.map(i => i.product);
+        const productsUsed = await Product.find({ _id: { $in: productIds }, status: 'active' });
+                const { minimumStock, outStock, totalNumberItems } = await getStocksInfo(allData)
+
+
         const notifications = await mongoose.model('Notification').find({
             recipients: createdBy,
             isRead: false
@@ -94,7 +100,12 @@ exports.deductStock = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            data: transaction,
+            data: productsUsed,
+            totalNumberItems,
+            minimumStock,
+            outStock,
+            currentPage: Number(page),
+            totalPages: Math.ceil(allData.length / limit),
             notifications: notifications.length > 0 ? notifications : undefined
         });
     } catch (error) {
@@ -151,7 +162,7 @@ exports.markNotificationAsRead = async (req, res) => {
             notification.readBy.push({ user: userId });
         }
 
-        if (notification.recipients.every(recipient => 
+        if (notification.recipients.every(recipient =>
             notification.readBy.some(read => read.user.toString() === recipient.toString()))) {
             notification.isRead = true;
         }
