@@ -266,7 +266,8 @@ exports.savePurchase = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            data: transaction
+            data: transaction,
+            message: "New purchase added"
         });
     } catch (error) {
         await session.abortTransaction();
@@ -281,7 +282,7 @@ exports.updatePurchase = async (req, res) => {
     session.startTransaction();
 
     try {
-        const { _id, items, totalAmount, supplier, notes, updatedBy } = req.body;
+        const { _id, items, totalAmount, supplier, notes, updatedBy, page = 1, limit = 5 } = req.body;
 
         // Validate required fields
         if (!_id) {
@@ -354,7 +355,7 @@ exports.updatePurchase = async (req, res) => {
                 product: item.product,
                 stock: item.quantity,
                 remainingStock: item.quantity,
-                purchaseDate: transaction.purchaseDate,
+                purchaseDate: transaction.transactionDate,
                 costPrice: item.unitPrice,
                 batchNumber: `BATCH-${Date.now()}-${item.product.slice(-6)}`,
                 createdBy: updatedBy,
@@ -369,7 +370,7 @@ exports.updatePurchase = async (req, res) => {
         transaction.items = items;
         transaction.totalAmount = totalAmount;
         transaction.supplier = supplier;
-        transaction.transactionDate = purchaseDate ? new Date(purchaseDate) : transaction.transactionDate;
+        transaction.transactionDate = transaction.transactionDate;
         transaction.notes = notes || transaction.notes;
         transaction.updatedBy = updatedBy;
         transaction.batchesUsed = batches.map((batch, i) => ({
@@ -389,16 +390,20 @@ exports.updatePurchase = async (req, res) => {
         await transaction.populate('supplier', 'companyName');
         await transaction.populate('batchesUsed.batch', 'batchNumber expiryDate');
 
+        const dataCount = await Transaction.countDocuments().session(session);
         res.status(200).json({
             success: true,
             message: 'Purchase updated successfully',
-            data: transaction
+            data: transaction,
+            currentPage: page,
+            totalPages: Math.ceil(dataCount.length / limit),
         });
     } catch (error) {
         await session.abortTransaction();
+        console.log(error.message)
         res.status(400).json({
             success: false,
-            message: error.message
+            message: "Something went wrong"
         });
     } finally {
         session.endSession();
@@ -410,7 +415,7 @@ exports.deletePurchase = async (req, res) => {
     session.startTransaction();
 
     try {
-        const { _id } = req.body;
+        const { _id, page = 1, limit = 5 } = req.body;
 
         // Validate required fields
         if (!_id) {
@@ -438,9 +443,14 @@ exports.deletePurchase = async (req, res) => {
         // Commit the transaction
         await session.commitTransaction();
 
+        const deletedTransaction = transaction.toObject();
+        const dataCount = await Transaction.countDocuments().session(session);
         res.status(200).json({
             success: true,
-            message: 'Purchase deleted successfully'
+            message: 'Purchase deleted successfully',
+            data: deletedTransaction,
+            currentPage: page,
+            totalPages: Math.ceil(dataCount.length / limit),
         });
     } catch (error) {
         await session.abortTransaction();
