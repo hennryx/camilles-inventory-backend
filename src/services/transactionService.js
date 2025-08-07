@@ -52,6 +52,7 @@ exports.getTopSellingProducts = async (month, year, limit = 5) => {
             $project: {
                 productId: '$_id',
                 productName: '$productDetails.productName',
+                image: '$productDetails.image',
                 unit: '$productDetails.unit',
                 unitSize: '$productDetails.unitSize',
                 sellingPrice: '$productDetails.sellingPrice',

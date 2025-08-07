@@ -51,6 +51,18 @@ const UserSchema = new mongoose.Schema({
     resetPasswordToken: String,
     resetPasswordExpire: Date,
 
+    addresses: [{
+        street: String,
+        city: String,
+        state: String,
+        postalCode: String,
+        country: String,
+        isDefault: {
+            type: Boolean,
+            default: false
+        }
+    }],
+
     createdAt: {
         type: Date,
         default: Date.now

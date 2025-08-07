@@ -1,31 +1,153 @@
 const Transaction = require('../../models/Transaction/TransactionSchema')
 const ProductBatchSchema = require('../../models/Products/batchSchema')
+const Product = require('../../models/Products/ProductSchema')
 const { getStocksInfo } = require('../../services/inventoryService')
+const Notification = require("../../models/Notification/NotificationSchema")
 
 exports.getTransactions = async (req, res) => {
     try {
-        const { startOfDay, endOfDay, type } = req.query
-        let query = {}
+        const page = Number(req.query.page) || 1;
+        const limit = Number(req.query.limit) || 5;
+        const skip = (page - 1) * limit;
 
-        if (startOfDay && endOfDay) {
-            query = {
-                createdAt: {
-                    $gte: startOfDay,
-                    $lte: endOfDay
+        let search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+        const regex = search ? new RegExp(search, 'i') : null;
+
+        let startDate = null
+        let endDate = null
+        let transactionType = "PURCHASE"
+        let supplierCompanyName = ""
+        
+        if (req.query) {
+            const { startOfDay, endOfDay, type } = req.query;
+            startDate = startOfDay ? new Date(startOfDay) : new Date();
+            endDate = endOfDay ? new Date(endOfDay) : new Date();
+            transactionType = typeof type === 'string' && type !== "All" ? type.trim() : 'PURCHASE';
+        }
+
+        const pipeline = [
+            {
+                $match: {
+                    transactionType: transactionType,
+                    ...(startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && {
+                        createdAt: {
+                            $gte: startDate,
+                            $lte: endDate
+                        }
+                    })
                 }
-            };
-        }
+            },
+            {
+                $lookup: {
+                    from: 'suppliers',
+                    localField: 'supplier',
+                    foreignField: '_id',
+                    as: 'supplier'
+                }
+            },
+            { $unwind: { path: '$supplier', preserveNullAndEmptyArrays: true } },
 
-        if (type !== "All") {
-            query.transactionType = type;
-        }
+            { $unwind: "$items" },
+            {
+                $lookup: {
+                    from: 'products',
+                    localField: 'items.product',
+                    foreignField: '_id',
+                    as: 'items.product'
+                }
+            },
+            { $unwind: "$items.product" },
+            {
+                $addFields: {
+                    "items.product": "$items.product",
+                    "items.unitPrice": "$items.unitPrice",
+                    "items.quantity": "$items.quantity"
+                }
+            },
+            {
+                $lookup: {
+                    from: 'productbatches',
+                    let: { productId: '$items.product._id', batchIds: '$batchesUsed.batch' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        { $eq: ['$product', '$$productId'] },
+                                        { $in: ['$_id', { $ifNull: ['$$batchIds', []] }] }
+                                    ]
+                                }
+                            }
+                        },
+                        { $limit: 1 } // Assuming one batch per item in PURCHASE
+                    ],
+                    as: 'batch'
+                }
+            },
+            {
+                $unwind: { path: '$batch', preserveNullAndEmptyArrays: true }
+            },
+            {
+                $group: {
+                    _id: "$_id",
+                    orderNumber: { $first: "$orderNumber" },
+                    transactionType: { $first: "$transactionType" },
+                    transactionDate: { $first: "$transactionDate" },
+                    createdAt: { $first: "$createdAt" },
+                    supplier: { $first: "$supplier" },
+                    createdBy: { $first: "$createdBy" },
+                    totalAmount: { $first: "$totalAmount" },
+                    notes: { $first: "$notes" },
+                    items: {
+                        $push: {
+                            product: "$items.product",
+                            quantity: "$items.quantity",
+                            unitPrice: "$items.unitPrice",
+                            expiryDate: "$batch.expiryDate"
+                        }
+                    }
+                }
+            },
+            {
+                $match: {
+                    ...(search && {
+                        $or: [
+                            { 'supplier.firstname': regex },
+                            { 'supplier.middlename': regex },
+                            { 'supplier.lastname': regex },
+                            { 'supplier.companyName': regex },
+                            { 'items.product.productName': regex }
+                        ]
+                    }),
+                    ...(supplierCompanyName && {
+                        $or: [
+                            { 'supplier.companyName': escapedSupplierCompanyName }
+                        ]
+                    })
+                }
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'createdBy',
+                    foreignField: '_id',
+                    as: 'createdBy'
+                }
+            },
+            { $unwind: { path: '$createdBy', preserveNullAndEmptyArrays: true } },
+            { $sort: { createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit }
+        ]
 
-        const transactions = await Transaction.find(query).populate('products.product').populate('suppliers').populate('createdBy');
+        const transactions = await Transaction.aggregate(pipeline)
 
         res.status(200).json({
             success: true,
             count: transactions.length,
-            data: transactions
+            data: transactions,
+            currentPage: page,
+            totalPages: Math.ceil(transactions.length / limit),
         });
     } catch (error) {
         res.status(400).json({
@@ -37,7 +159,7 @@ exports.getTransactions = async (req, res) => {
 
 exports.deductStock = async (req, res) => {
     try {
-        const { transactionType, items, totalAmount, notes, createdBy, page=1, limit=5 } = req.body;
+        const { transactionType, items, totalAmount, notes, createdBy, page = 1, limit = 5 } = req.body;
 
         // Validate required fields
         if (!transactionType || !items || !totalAmount || !createdBy) {
@@ -90,10 +212,11 @@ exports.deductStock = async (req, res) => {
 
         const productIds = items.map(i => i.product);
         const productsUsed = await Product.find({ _id: { $in: productIds }, status: 'active' });
-                const { minimumStock, outStock, totalNumberItems } = await getStocksInfo(allData)
 
+        const allData = await Product.find({ status: 'active' });
+        const { minimumStock, outStock, totalNumberItems } = await getStocksInfo(allData)
 
-        const notifications = await mongoose.model('Notification').find({
+        const notifications = await Notification.find({
             recipients: createdBy,
             isRead: false
         }).populate('relatedEntity', 'batchNumber productName');
@@ -109,6 +232,7 @@ exports.deductStock = async (req, res) => {
             notifications: notifications.length > 0 ? notifications : undefined
         });
     } catch (error) {
+        console.log(error)
         res.status(400).json({ error: error.message });
     }
 };

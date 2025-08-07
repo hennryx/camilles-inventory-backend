@@ -6,6 +6,7 @@ const routes = require('./routes');
 const { startCronJobs, stopCronJobs } = require("./config/cron")
 const cors = require('cors');
 const cookieParser = require('cookie-parser')
+const ProductBatch = require("./models/Products/batchSchema")
 
 const { connectDB, mongoose } = require('./config/db')
 connectDB()
@@ -42,6 +43,25 @@ connectDB()
         app.get("/api/health", (req, res) => {
             res.status(200).json({ success: true });
         });
+
+        /*  app.get('/update-product-batches', async (req, res) => {
+                    try {
+                        const result = await ProductBatch.updateMany({}, {
+                            $set: {
+                                condition: "good",
+                                status: "active"
+                            }
+                        });
+                
+                        res.status(200).json({
+                            message: 'All documents updated successfully',
+                            modifiedCount: result.modifiedCount
+                        });
+                    } catch (error) {
+                        console.error(error);
+                        res.status(500).json({ error: 'Failed to update documents' });
+                    }
+                }); */
 
         app.use('/', routes);
 

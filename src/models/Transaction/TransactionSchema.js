@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const Users = require('../Users');
+const ProductSchema = require('../Products/ProductSchema');
+const ProductBatch = require('../Products/batchSchema');
+const Notification = require('../Notification/NotificationSchema');
 
 // Function to format date and time for order number
 function formatDateForOrderNumber(date) {
@@ -124,15 +128,18 @@ TransactionSchema.pre('save', async function (next) {
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
 
-                const batches = await mongoose.model('ProductBatch')
-                    .find({ 
-                        product: productId, 
+                const batches = await ProductBatch
+                    .find({
+                        product: productId,
                         remainingStock: { $gt: 0 },
                         status: 'active',
                         condition: 'good',
                         expiryDate: { $gt: today }
                     })
                     .sort({ purchaseDate: 1 });
+
+                console.log(`Batches found for product ${productId}:`, batches);
+                console.log(`Total available stock: ${batches.reduce((sum, batch) => sum + batch.remainingStock, 0)}`);
 
                 this.batchesUsed = this.batchesUsed || [];
                 for (const batch of batches) {
@@ -144,21 +151,21 @@ TransactionSchema.pre('save', async function (next) {
                     await batch.save();
                 }
                 if (quantityNeeded > 0) {
-                    throw new Error(`Insufficient valid stock for product ${productId}. Check for expired or inactive batches.`);
+                    throw new Error(`Insufficient stock for this product.`);
                 }
-                await mongoose.model('Product').updateTotalStock(productId);
+                await ProductSchema.updateTotalStock(productId);
             }
-            
+
             // Notify admins and staff for SALE transactions (customer orders)
             if (this.transactionType === 'SALE') {
-                const products = await mongoose.model('Product').find({
+                const products = await ProductSchema.find({
                     _id: { $in: this.items.map(item => item.product) }
                 }, 'productName');
                 const productNames = products.map(p => p.productName).join(', ');
-                const usersToNotify = await mongoose.model('User').find({
+                const usersToNotify = await Users.find({
                     role: { $in: ['admin', 'staff'] }
                 });
-                await mongoose.model('Notification').create({
+                await Notification.create({
                     message: `Customer order placed (Order #${this.orderNumber}) for products: ${productNames}`,
                     type: 'SYSTEM',
                     relatedEntity: this._id,
