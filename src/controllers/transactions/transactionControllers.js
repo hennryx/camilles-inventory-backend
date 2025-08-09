@@ -15,14 +15,18 @@ exports.getTransactions = async (req, res) => {
 
         let startDate = null
         let endDate = null
-        let transactionType = "PURCHASE"
+        let transactionType = req.query.type || "PURCHASE"
         let supplierCompanyName = ""
-        
+
         if (req.query) {
-            const { startOfDay, endOfDay, type } = req.query;
-            startDate = startOfDay ? new Date(startOfDay) : new Date();
-            endDate = endOfDay ? new Date(endOfDay) : new Date();
-            transactionType = typeof type === 'string' && type !== "All" ? type.trim() : 'PURCHASE';
+            const { startOfDate, endOfDate, type } = req.query;
+            startDate = startOfDate ? new Date(startOfDate) : new Date();
+            endDate = endOfDate ? new Date(endOfDate) : new Date();
+
+            startDate.setUTCHours(0, 0, 0, 0);
+            endDate.setUTCHours(23, 59, 59, 999);
+            
+            transactionType = typeof type === 'string' && type ? type.trim() : 'PURCHASE';
         }
 
         const pipeline = [
@@ -30,7 +34,7 @@ exports.getTransactions = async (req, res) => {
                 $match: {
                     transactionType: transactionType,
                     ...(startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && {
-                        createdAt: {
+                        transactionDate: {
                             $gte: startDate,
                             $lte: endDate
                         }
@@ -141,6 +145,7 @@ exports.getTransactions = async (req, res) => {
         ]
 
         const transactions = await Transaction.aggregate(pipeline)
+
 
         res.status(200).json({
             success: true,
